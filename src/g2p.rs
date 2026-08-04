@@ -1026,4 +1026,26 @@ mod tests {
         );
         Ok(())
     }
+
+    #[test]
+    fn dall_e_embedded_lexicon_whole_hyphenated_token() -> Result<(), super::G2PError> {
+        let a = super::g2p_audit("I use DALL-E for images.", false)?;
+        assert!(
+            a.phonemes.contains("dˈæli"),
+            "DALL-E should use embedded whole-token IPA, got {:?}",
+            a.phonemes
+        );
+        assert!(
+            a.unknown_phoneme_chars.is_empty(),
+            "DALL-E IPA must be vocab-safe, unknown: {:?}",
+            a.unknown_phoneme_chars
+        );
+        // Letter-spelling the "DALL" segment would inject per-letter IPA, not dˈæli.
+        assert!(
+            !a.phonemes.contains("dˈiː ˈeɪ ˈɛl ˈɛl"),
+            "should not letter-spell DALL: {:?}",
+            a.phonemes
+        );
+        Ok(())
+    }
 }

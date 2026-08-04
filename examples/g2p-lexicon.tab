@@ -1,0 +1,7 @@
+# Example G2P lexicon overrides for KOKORO_G2P_LEXICON.
+# Format: word<TAB>ipa  (# comments and blank lines ignored; keys are case-insensitive)
+#
+# export KOKORO_G2P_LEXICON=/path/to/this/file
+# KOKORO_G2P_TRACE=1 cargo run --bin kokoro-g2p-audit -- "I use DALL-E for images."
+
+DALL-E	dˈæli

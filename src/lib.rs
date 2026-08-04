@@ -135,45 +135,95 @@ fn configure_execution_providers(builder: SessionBuilder) -> SessionBuilder {
 
 #[cfg(not(target_os = "macos"))]
 fn configure_execution_providers(builder: SessionBuilder) -> SessionBuilder {
-    use ort::execution_providers::CUDAExecutionProvider;
+    use ort::ep::CUDA;
+    #[cfg(target_os = "windows")]
+    use ort::ep::DirectML;
 
     let requested = env::var("KOKORO_ORT_PROVIDER").unwrap_or_else(|_| "auto".to_owned());
     if requested.eq_ignore_ascii_case("cpu") {
         eprintln!("kokoro ort | using CPU provider (KOKORO_ORT_PROVIDER=cpu)");
         return builder;
     }
-    if !(requested.eq_ignore_ascii_case("auto") || requested.eq_ignore_ascii_case("cuda")) {
+
+    let explicit_cuda = requested.eq_ignore_ascii_case("cuda");
+    let explicit_directml = requested.eq_ignore_ascii_case("directml");
+    let mut auto = requested.eq_ignore_ascii_case("auto");
+
+    if !(auto || explicit_cuda || explicit_directml) {
         eprintln!(
             "kokoro ort | unknown KOKORO_ORT_PROVIDER={:?}, defaulting to auto",
             requested
         );
+        auto = true;
     }
 
-    match builder
-        .clone()
-        .with_execution_providers([CUDAExecutionProvider::default().build()])
-    {
-        Ok(builder) => {
-            eprintln!("kokoro ort | using CUDA execution provider");
-            builder
-        }
-        Err(err) => {
-            eprintln!(
-                "kokoro ort | CUDA unavailable, falling back to CPU provider: {}",
-                err
-            );
-            builder
+    // `auto`: try CUDA, then DirectML on Windows.
+    // Explicit `cuda` / `directml`: only that EP (no cross-fallback between them).
+    let try_cuda = auto || explicit_cuda;
+
+    if try_cuda {
+        match builder
+            .clone()
+            .with_execution_providers([CUDA::default().build().error_on_failure()])
+        {
+            Ok(builder) => {
+                eprintln!("kokoro ort | using CUDA execution provider");
+                return builder;
+            }
+            Err(err) => {
+                eprintln!("kokoro ort | CUDA unavailable: {}", err);
+                if explicit_cuda {
+                    eprintln!("kokoro ort | falling back to CPU provider");
+                    return builder;
+                }
+            }
         }
     }
+
+    #[cfg(target_os = "windows")]
+    {
+        let try_directml = auto || explicit_directml;
+        if try_directml {
+            match builder
+                .clone()
+                .with_execution_providers([DirectML::default().build().error_on_failure()])
+            {
+                Ok(builder) => {
+                    eprintln!("kokoro ort | using DirectML execution provider");
+                    return builder;
+                }
+                Err(err) => {
+                    eprintln!("kokoro ort | DirectML unavailable: {}", err);
+                    if explicit_directml {
+                        eprintln!("kokoro ort | falling back to CPU provider");
+                        return builder;
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    if explicit_directml {
+        eprintln!(
+            "kokoro ort | DirectML is only available on Windows; falling back to CPU provider"
+        );
+        return builder;
+    }
+
+    eprintln!("kokoro ort | falling back to CPU provider");
+    builder
 }
 
 /// True when the user is allowed an automatic CPU fallback.
 ///
-/// Disabled by setting `KOKORO_ORT_PROVIDER=coreml` / `=cuda` (i.e. an explicit
-/// hardware EP request). `auto` (the default) and unset both allow fallback.
+/// Disabled by setting `KOKORO_ORT_PROVIDER=coreml` / `=cuda` / `=directml` (i.e. an
+/// explicit hardware EP request). `auto` (the default) and unset both allow fallback.
 fn allow_cpu_fallback() -> bool {
     let requested = env::var("KOKORO_ORT_PROVIDER").unwrap_or_else(|_| "auto".to_owned());
-    !(requested.eq_ignore_ascii_case("coreml") || requested.eq_ignore_ascii_case("cuda"))
+    !(requested.eq_ignore_ascii_case("coreml")
+        || requested.eq_ignore_ascii_case("cuda")
+        || requested.eq_ignore_ascii_case("directml"))
 }
 
 /// Whether the session's `speed` input is `i32` (v1.1 models) instead of `f32` (v1.0).

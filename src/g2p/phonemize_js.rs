@@ -1,5 +1,7 @@
 //! Kokoro.js [`phonemize`](https://github.com/hexgrad/kokoro/blob/main/kokoro-js/src/phonemize.js) parity:
 //! normalize → punctuation split → **segment IPA** (same order as upstream priority):
+//! 0. If any whitespace-separated token has a [`super::lexicon`] / embedded OOV hit, phonemize
+//!    **word-by-word** so overrides win over segment eSpeak (e.g. DALL-E).
 //! 1. **system `espeak-ng`** on the whole section ([`super::espeak_cli::segment_ipa`]) unless
 //!    `KOKORO_G2P_SEGMENT_ESPEAK=0` or `KOKORO_ESPEAK_NG` disables eSpeak.
 //! 2. With crate feature `g2p-espeak`, phrase [`super::backend::misaki_phonemize_segment`] (Misaki +
@@ -14,12 +16,23 @@ use regex::{Captures, Regex as StdRegex};
 use super::backend::misaki_phonemize_segment;
 use super::backend::misaki_phonemize_word_oov_retry;
 use super::espeak_cli;
+use super::lexicon::lexicon_lookup;
 use super::normalize_ipa_for_vocab;
 
 fn phonemize_text_segment(text: &str, british: bool) -> String {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return String::new();
+    }
+
+    // Lexicon / embedded OOV must win over segment eSpeak (which letter-spells brands like DALL-E).
+    let words: Vec<&str> = trimmed.split_whitespace().collect();
+    if words.iter().any(|w| lexicon_lookup(w).is_some()) {
+        return words
+            .iter()
+            .map(|w| misaki_phonemize_word_oov_retry(w, british))
+            .collect::<Vec<_>>()
+            .join(" ");
     }
 
     if std::env::var("KOKORO_G2P_SEGMENT_ESPEAK").ok().as_deref() != Some("0") {
@@ -39,8 +52,8 @@ fn phonemize_text_segment(text: &str, british: bool) -> String {
         }
     }
 
-    trimmed
-        .split_whitespace()
+    words
+        .iter()
         .map(|w| misaki_phonemize_word_oov_retry(w, british))
         .collect::<Vec<_>>()
         .join(" ")

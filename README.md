@@ -10,12 +10,32 @@ A lightweight, offline Rust inference library for [Kokoro TTS](https://github.co
 
 - 100% offline - no network calls at runtime.
 - Cross-platform - builds on macOS, Linux, Windows; cross-compiles to Android and iOS.
-- Hardware acceleration - CoreML on macOS, CUDA on Linux/Windows, with automatic CPU fallback.
+- Hardware acceleration - CoreML on macOS, CUDA on Linux/Windows, DirectML fallback on Windows, with automatic CPU fallback.
 - Multiple model sizes - full-precision (`model.onnx`), 8-bit-quantized (`model_quantized.onnx`), and others.
 - Multiple voices spanning English, Mandarin, Spanish, French, Japanese, Italian, Hindi, Brazilian Portuguese. Only battle tested with English.
 - Streaming and one-shot synthesis modes.
 - G2P tools: `g2p_audit()`, optional `KOKORO_G2P_LEXICON` overrides, and the `kokoro-g2p-audit` binary for phoneme/vocab checks (see [ARCHITECTURE.md](ARCHITECTURE.md)).
 - **Default crate features include `g2p-espeak`**: Misaki links bundled **espeak-ng** (via CMake) for out-of-vocabulary words (kokoro-js–like behavior). Slim Misaki-only build: `cargo build --no-default-features` (optional `--features misaki-lean`). Optional system `espeak-ng` improves segment-level phonemization; see `g2p_espeak_capability()` / `KOKORO_G2P_REQUIRE_ESPEAK`.
+
+### Custom pronunciations (`KOKORO_G2P_LEXICON`)
+
+Brand names and other OOV words (e.g. **DALL-E**) often need an IPA override. Create a UTF-8 file of `word<TAB>ipa` lines (`#` comments and blank lines ignored; keys are case-insensitive), then point the env var at it:
+
+```bash
+export KOKORO_G2P_LEXICON=/path/to/examples/g2p-lexicon.tab
+KOKORO_G2P_TRACE=1 cargo run --bin kokoro-g2p-audit -- "I use DALL-E for images."
+```
+
+**Add more words at runtime** (no rebuild) — append `word<TAB>ipa` lines to your lexicon file:
+
+```bash
+echo -e 'MyBrand\tmˈaɪbɹænd' >> examples/g2p-lexicon.tab
+export KOKORO_G2P_LEXICON=/path/to/examples/g2p-lexicon.tab
+```
+
+**Or permanently** — add the same `word<TAB>ipa` line to [`src/g2p/embedded_g2p_oov.tab`](src/g2p/embedded_g2p_oov.tab) and rebuild so `include_str!` picks it up.
+
+Lexicon hits apply **before** CMUdict / Misaki / eSpeak. For hyphenated forms like `DALL-E`, use the **whole** token as the key so G2P does not split and letter-spell the parts. See [ARCHITECTURE.md](ARCHITECTURE.md) for more G2P debugging helpers.
 
 ---
 
@@ -193,27 +213,33 @@ Pick the voice file you want from the [Hugging Face `voices/` folder](https://hu
 The library auto-selects the best available backend:
 
 - **macOS** → CoreML (Neural Engine + GPU). Falls back to CPU if the model can't run on CoreML.
-- **Linux / Windows** → CUDA if available, else CPU.
+- **Linux** → CUDA if available, else CPU.
+- **Windows** → CUDA if available, else DirectML (DX12), else CPU.
 
 You can override or pin the provider with environment variables:
 
 | Variable                              | Values                                                                      |
 | ------------------------------------- | --------------------------------------------------------------------------- |
-| `KOKORO_ORT_PROVIDER`                 | `auto` (default), `cpu`, `coreml`, `cuda`                                   |
+| `KOKORO_ORT_PROVIDER`                 | `auto` (default), `cpu`, `coreml`, `cuda`, `directml`                       |
 | `KOKORO_COREML_MODEL_FORMAT`          | `neuralnetwork` (default), `mlprogram`                                      |
 | `KOKORO_COREML_COMPUTE_UNITS`         | `all` (default), `ane`, `gpu`, `cpu_only`                                   |
 | `KOKORO_COREML_STATIC_INPUT_SHAPES`   | `0` (default) / `1`                                                         |
 
-Setting `KOKORO_ORT_PROVIDER=coreml` or `=cuda` disables the automatic CPU fallback so failures surface explicitly.
+Setting `KOKORO_ORT_PROVIDER=coreml`, `=cuda`, or `=directml` disables the automatic CPU fallback after a failed probe so failures surface explicitly. Startup logs (`kokoro ort | using …`) report which provider was actually registered.
 
 ---
 
 ## Troubleshooting
 
+- **Mispronounced brand / proper name** - add a `word<TAB>ipa` line via `KOKORO_G2P_LEXICON` (see [Custom pronunciations](#custom-pronunciations-kokoro_g2p_lexicon)) or extend `src/g2p/embedded_g2p_oov.tab`. Audit with `cargo run --bin kokoro-g2p-audit -- "…"`.
 - **`VoiceNotFound("af_heart")`** - the file `voices/af_heart.bin` doesn't exist. Download it from the Hugging Face `voices/` folder.
 - **`Io(... model.onnx ...)`** - the model file isn't where you said it was. Check the path you passed to `KokoroTts::new`.
 - **`no .bin voice files found in voices`** - the directory is empty. Drop at least one `<name>.bin` file in there.
 - **CoreML errors at startup** - set `KOKORO_ORT_PROVIDER=cpu` to force a known-good path. Quantized models don't run on CoreML; the library detects this and falls back to CPU automatically when `KOKORO_ORT_PROVIDER` is left at `auto`.
+- **Windows GPU idle / slow synth (CPU fallback)** - check stderr for `kokoro ort | using …` / `… unavailable`:
+  - **NVIDIA**: install a CUDA toolkit + cuDNN matching the ORT build (see [ort CUDA notes](https://ort.pyke.io/perf/execution-providers); use `ORT_CUDA_VERSION=12` at build time if you need the CUDA 12 binaries). Ensure `onnxruntime_providers_cuda*.dll` sits next to your executable (`ort`'s default `copy-dylibs` does this for Cargo binaries). Set `KOKORO_ORT_PROVIDER=cuda` to fail loudly instead of falling through.
+  - **AMD / Intel / no CUDA**: leave `KOKORO_ORT_PROVIDER=auto` (or set `=directml`) so DirectML can use a DX12 GPU.
+  - Force CPU with `KOKORO_ORT_PROVIDER=cpu` if you need a known-good path.
 
 ---
 
