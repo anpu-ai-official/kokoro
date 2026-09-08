@@ -14,7 +14,8 @@ use {
     ort::{
         inputs,
         session::{Session, builder::SessionBuilder},
-        value::{TensorElementType, TensorRef, ValueType},
+        tensor::TensorElementType,
+        value::{TensorRef, ValueType},
     },
     std::{collections::HashMap, env, path::Path, sync::Arc, time::Duration},
     tokio::{fs::read, sync::Mutex},
@@ -34,7 +35,7 @@ pub struct KokoroTts {
     is_v11: bool,
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any())]
 fn configure_execution_providers(builder: SessionBuilder) -> SessionBuilder {
     use ort::ep::{
         CoreML,
@@ -133,7 +134,7 @@ fn configure_execution_providers(builder: SessionBuilder) -> SessionBuilder {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any())]
 fn configure_execution_providers(builder: SessionBuilder) -> SessionBuilder {
     use ort::ep::DirectML;
 
@@ -178,7 +179,6 @@ fn configure_execution_providers(builder: SessionBuilder) -> SessionBuilder {
     builder
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn configure_execution_providers(builder: SessionBuilder) -> SessionBuilder {
     let requested = env::var("KOKORO_ORT_PROVIDER").unwrap_or_else(|_| "auto".to_owned());
     if !(requested.eq_ignore_ascii_case("auto") || requested.eq_ignore_ascii_case("cpu")) {
@@ -197,10 +197,7 @@ fn configure_execution_providers(builder: SessionBuilder) -> SessionBuilder {
 /// Disabled by setting `KOKORO_ORT_PROVIDER=coreml` / `=cuda` / `=directml` (i.e. an
 /// explicit hardware EP request). `auto` (the default) and unset both allow fallback.
 fn allow_cpu_fallback() -> bool {
-    let requested = env::var("KOKORO_ORT_PROVIDER").unwrap_or_else(|_| "auto".to_owned());
-    !(requested.eq_ignore_ascii_case("coreml")
-        || requested.eq_ignore_ascii_case("cuda")
-        || requested.eq_ignore_ascii_case("directml"))
+    true
 }
 
 /// Whether the session's `speed` input is `i32` (v1.1 models) instead of `f32` (v1.0).
@@ -291,7 +288,7 @@ enum ModelSource<'a> {
 
 fn build_session(source: ModelSource<'_>, force_cpu: bool) -> Result<Session, KokoroError> {
     let builder = Session::builder()?;
-    let mut builder = if force_cpu {
+    let builder = if force_cpu {
         builder
     } else {
         configure_execution_providers(builder)

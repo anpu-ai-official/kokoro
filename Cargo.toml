@@ -24,6 +24,7 @@ futures = "0.3.31"
 log = "0.4.29"
 misaki-rs = { version = "0.3.0", default-features = false }
 ndarray = "0.17.2"
+ort = { version = "=2.0.0-rc.11" }
 pin-project = "1.1.10"
 regex = "1.12.2"
 tokio = { version = "1.49.0",features = ["fs", "rt-multi-thread","time", "sync"] }
@@ -35,12 +36,3 @@ voxudio = { version = "0.5.7",features = ["device"] }
 
 [build-dependencies]
 cc = "1.2.53"
-
-[target.'cfg(target_os = "macos")'.dependencies]
-ort = { version = "2.0.0-rc.11", features = ["coreml", "lax-feature-matching"] }
-
-[target.'cfg(target_os = "windows")'.dependencies]
-ort = { version = "2.0.0-rc.11", features = ["directml", "lax-feature-matching"] }
-
-[target.'cfg(not(any(target_os = "macos", target_os = "windows")))'.dependencies]
-ort = { version = "=2.0.0-rc.11" }
