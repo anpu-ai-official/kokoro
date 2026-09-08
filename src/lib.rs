@@ -203,10 +203,10 @@ fn allow_cpu_fallback() -> bool {
 /// Whether the session's `speed` input is `i32` (v1.1 models) instead of `f32` (v1.0).
 fn session_speed_is_i32(session: &Session) -> bool {
     session
-        .inputs()
+        .inputs
         .iter()
-        .find(|input| input.name() == "speed")
-        .and_then(|input| match input.dtype() {
+        .find(|input| input.name == "speed")
+        .and_then(|input| match &input.input_type {
             ValueType::Tensor { ty, .. } => Some(*ty == TensorElementType::Int32),
             _ => None,
         })
