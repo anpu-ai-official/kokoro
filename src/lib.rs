@@ -35,11 +35,10 @@ pub struct KokoroTts {
     is_v11: bool,
 }
 
-#[cfg(any())]
+#[cfg(target_vendor = "apple")]
 fn configure_execution_providers(builder: SessionBuilder) -> SessionBuilder {
-    use ort::ep::{
-        CoreML,
-        coreml::{ComputeUnits, ModelFormat},
+    use ort::execution_providers::coreml::{
+        CoreMLComputeUnits, CoreMLExecutionProvider, CoreMLModelFormat,
     };
 
     let requested = env::var("KOKORO_ORT_PROVIDER").unwrap_or_else(|_| "auto".to_owned());
@@ -63,14 +62,16 @@ fn configure_execution_providers(builder: SessionBuilder) -> SessionBuilder {
         .to_ascii_lowercase()
         .as_str()
     {
-        "mlprogram" | "ml_program" | "ml-program" => ModelFormat::MLProgram,
-        "neuralnetwork" | "neural_network" | "neural-network" | "nn" => ModelFormat::NeuralNetwork,
+        "mlprogram" | "ml_program" | "ml-program" => CoreMLModelFormat::MLProgram,
+        "neuralnetwork" | "neural_network" | "neural-network" | "nn" => {
+            CoreMLModelFormat::NeuralNetwork
+        }
         other => {
             eprintln!(
                 "kokoro ort | unknown KOKORO_COREML_MODEL_FORMAT={:?}, using NeuralNetwork",
                 other
             );
-            ModelFormat::NeuralNetwork
+            CoreMLModelFormat::NeuralNetwork
         }
     };
 
@@ -79,20 +80,20 @@ fn configure_execution_providers(builder: SessionBuilder) -> SessionBuilder {
         .to_ascii_lowercase()
         .as_str()
     {
-        "all" => ComputeUnits::All,
+        "all" => CoreMLComputeUnits::All,
         "ane"
         | "neural_engine"
         | "neural-engine"
         | "cpu_and_neural_engine"
-        | "cpu-and-neural-engine" => ComputeUnits::CPUAndNeuralEngine,
-        "gpu" | "cpu_and_gpu" | "cpu-and-gpu" => ComputeUnits::CPUAndGPU,
-        "cpu_only" | "cpu-only" | "cpuonly" => ComputeUnits::CPUOnly,
+        | "cpu-and-neural-engine" => CoreMLComputeUnits::CPUAndNeuralEngine,
+        "gpu" | "cpu_and_gpu" | "cpu-and-gpu" => CoreMLComputeUnits::CPUAndGPU,
+        "cpu_only" | "cpu-only" | "cpuonly" => CoreMLComputeUnits::CPUOnly,
         other => {
             eprintln!(
                 "kokoro ort | unknown KOKORO_COREML_COMPUTE_UNITS={:?}, using ALL",
                 other
             );
-            ComputeUnits::All
+            CoreMLComputeUnits::All
         }
     };
 
@@ -100,7 +101,7 @@ fn configure_execution_providers(builder: SessionBuilder) -> SessionBuilder {
         .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "True" | "yes" | "on"))
         .unwrap_or(false);
 
-    let coreml = CoreML::default()
+    let coreml = CoreMLExecutionProvider::default()
         .with_model_format(model_format)
         .with_compute_units(compute_units)
         .with_static_input_shapes(static_input_shapes)
@@ -111,14 +112,14 @@ fn configure_execution_providers(builder: SessionBuilder) -> SessionBuilder {
             eprintln!(
                 "kokoro ort | using CoreML execution provider (model_format={}, compute_units={}, static_input_shapes={})",
                 match model_format {
-                    ModelFormat::MLProgram => "MLProgram",
-                    ModelFormat::NeuralNetwork => "NeuralNetwork",
+                    CoreMLModelFormat::MLProgram => "MLProgram",
+                    CoreMLModelFormat::NeuralNetwork => "NeuralNetwork",
                 },
                 match compute_units {
-                    ComputeUnits::All => "ALL",
-                    ComputeUnits::CPUAndNeuralEngine => "CPUAndNeuralEngine",
-                    ComputeUnits::CPUAndGPU => "CPUAndGPU",
-                    ComputeUnits::CPUOnly => "CPUOnly",
+                    CoreMLComputeUnits::All => "ALL",
+                    CoreMLComputeUnits::CPUAndNeuralEngine => "CPUAndNeuralEngine",
+                    CoreMLComputeUnits::CPUAndGPU => "CPUAndGPU",
+                    CoreMLComputeUnits::CPUOnly => "CPUOnly",
                 },
                 static_input_shapes
             );
@@ -134,9 +135,9 @@ fn configure_execution_providers(builder: SessionBuilder) -> SessionBuilder {
     }
 }
 
-#[cfg(any())]
+#[cfg(target_os = "windows")]
 fn configure_execution_providers(builder: SessionBuilder) -> SessionBuilder {
-    use ort::ep::DirectML;
+    use ort::execution_providers::DirectMLExecutionProvider;
 
     let requested = env::var("KOKORO_ORT_PROVIDER").unwrap_or_else(|_| "auto".to_owned());
     if requested.eq_ignore_ascii_case("cpu") {
@@ -159,7 +160,9 @@ fn configure_execution_providers(builder: SessionBuilder) -> SessionBuilder {
     if try_directml {
         match builder
             .clone()
-            .with_execution_providers([DirectML::default().build().error_on_failure()])
+            .with_execution_providers([DirectMLExecutionProvider::default()
+                .build()
+                .error_on_failure()])
         {
             Ok(builder) => {
                 eprintln!("kokoro ort | using DirectML execution provider");
@@ -179,6 +182,7 @@ fn configure_execution_providers(builder: SessionBuilder) -> SessionBuilder {
     builder
 }
 
+#[cfg(not(any(target_vendor = "apple", target_os = "windows")))]
 fn configure_execution_providers(builder: SessionBuilder) -> SessionBuilder {
     let requested = env::var("KOKORO_ORT_PROVIDER").unwrap_or_else(|_| "auto".to_owned());
     if !(requested.eq_ignore_ascii_case("auto") || requested.eq_ignore_ascii_case("cpu")) {
